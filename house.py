@@ -49,6 +49,16 @@ if data is None:
         st.error("Error parsing local CSV file. Please ensure 'house_prices_dataset.csv' is a valid CSV.")
         st.stop()
 
+# Ensure data types are correct
+data['square_feet'] = pd.to_numeric(data['square_feet'], errors='coerce')
+data['age'] = pd.to_numeric(data['age'], errors='coerce')
+data['num_rooms'] = pd.to_numeric(data['num_rooms'], errors='coerce')
+data['distance_to_city(km)'] = pd.to_numeric(data['distance_to_city(km)'], errors='coerce')
+data['price'] = pd.to_numeric(data['price'], errors='coerce')
+
+# Drop rows with NaN values in critical columns
+data = data.dropna(subset=['square_feet', 'age', 'num_rooms', 'distance_to_city(km)', 'price'])
+
 # Model selection
 model_type = st.sidebar.selectbox("Select Model", ["Random Forest", "Linear Regression", "Gradient Boosting"])
 
@@ -64,27 +74,26 @@ use_scaling = st.sidebar.checkbox("Use Feature Scaling", value=True)
 # Test size for train-test split
 test_size = st.sidebar.slider("Test Size (%)", min_value=10, max_value=50, value=20, step=5) / 100.0
 
-# Sidebar filters
-st.sidebar.subheader("Filter Data")
-min_square_feet = st.sidebar.slider("Minimum Square Feet", 
-                                   min_value=float(data['square_feet'].min()), 
-                                   max_value=float(data['square_feet'].max()), 
-                                   value=float(data['square_feet'].min()))
-max_age = st.sidebar.slider("Maximum House Age (years)", 
-                           min_value=0, 
-                           max_value=int(data['age'].max()), 
-                           value=int(data['age'].max()))
-min_rooms = st.sidebar.slider("Minimum Number of Rooms", 
-                             min_value=1, 
-                             max_value=int(data['num_rooms'].max()), 
-                             value=1)
-
-# Filter data based on sidebar inputs
-filtered_data = data[
-    (data['square_feet'] >= min_square_feet) &
-    (data['age'] <= max_age) &
-    (data['num_rooms'] >= min_rooms)
-]
+# Sidebar input features for prediction
+st.sidebar.subheader("Prediction Inputs")
+square_feet = st.sidebar.number_input("Square Feet", 
+                                     min_value=500.0, 
+                                     max_value=5000.0, 
+                                     value=2000.0, 
+                                     step=100.0)
+num_rooms = st.sidebar.slider("Number of Rooms", 
+                              min_value=1, 
+                              max_value=10, 
+                              value=3)
+age = st.sidebar.slider("Age of House (years)", 
+                        min_value=0.0, 
+                        max_value=100.0, 
+                        value=20.0)
+distance_to_city = st.sidebar.number_input("Distance to City Center (km)", 
+                                          min_value=0.0, 
+                                          max_value=50.0, 
+                                          value=10.0, 
+                                          step=1.0)
 
 # Sidebar visualization options
 st.sidebar.subheader("Visualizations")
@@ -92,6 +101,9 @@ plot_type = st.sidebar.selectbox("Select Plot Type", ["None", "Price Distributio
 feature_for_scatter = st.sidebar.selectbox("Select Feature for Scatter Plot", 
                                          ["square_feet", "num_rooms", "age", "distance_to_city(km)"], 
                                          index=0)
+
+# Use original data (no filters applied)
+filtered_data = data
 
 # Data preprocessing
 data = data[data['price'] > 0]  # Remove negative prices
@@ -127,39 +139,22 @@ st.write(f"Model R² Score ({model_type}): {score:.4f}")
 # Main content
 st.write("""
 This app predicts house prices based on square footage, number of rooms, age of the house, and distance to the city center.
-Enter the details below to get a predicted price.
+Adjust the inputs in the sidebar to get a predicted price.
 """)
 
-# Input form
-with st.form("prediction_form"):
-    square_feet = st.number_input("Square Feet", min_value=500.0, max_value=5000.0, value=2000.0, step=100.0)
-    num_rooms = st.slider("Number of Rooms", min_value=1, max_value=10, value=3)
-    age = st.slider("Age of House (years)", min_value=0, max_value=100, value=20)
-    distance_to_city = st.number_input("Distance to City Center (km)", min_value=0.0, max_value=50.0, value=10.0, step=1.0)
-    submitted = st.form_submit_button("Predict Price")
-
-# Prediction
-if submitted:
-    input_data = pd.DataFrame({
-        'square_feet': [square_feet],
-        'num_rooms': [num_rooms],
-        'age': [age],
-        'distance_to_city(km)': [distance_to_city]
-    })
-    if use_scaling and scaler is not None:
-        input_data_scaled = scaler.transform(input_data)
-    else:
-        input_data_scaled = input_data
-    prediction = model.predict(input_data_scaled)[0]
-    st.success(f"Predicted House Price: ${prediction:,.2f}")
-
-# Display filtered dataset
-st.subheader("Filtered Data Sample")
-st.dataframe(filtered_data.head())
-
-# Display dataset statistics
-st.subheader("Filtered Dataset Statistics")
-st.write(filtered_data.describe())
+# Live prediction
+input_data = pd.DataFrame({
+    'square_feet': [square_feet],
+    'num_rooms': [num_rooms],
+    'age': [age],
+    'distance_to_city(km)': [distance_to_city]
+})
+if use_scaling and scaler is not None:
+    input_data_scaled = scaler.transform(input_data)
+else:
+    input_data_scaled = input_data
+prediction = model.predict(input_data_scaled)[0]
+st.success(f"Predicted House Price: ${prediction:,.2f}")
 
 # Visualizations
 if plot_type != "None":
