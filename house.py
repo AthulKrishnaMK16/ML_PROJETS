@@ -1,15 +1,28 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 import requests
-from io import StringIO
+from io import StringIO, BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import os
+
+# Register premium font (Helvetica is available, or use a custom one if available)
+try:
+    pdfmetrics.registerFont(TTFont('Helvetica-Bold', 'Helvetica-Bold.ttf'))
+except:
+    pass  # Fallback to default
 
 # Streamlit app
 st.title("House Price Prediction")
@@ -134,44 +147,171 @@ model.fit(X_train_scaled, y_train)
 
 # Evaluate model
 score = model.score(X_test_scaled, y_test)
-st.write(f"Model R² Score ({model_type}): {score:.4f}")
 
-# Main content
-st.write("""
-This app predicts house prices based on square footage, number of rooms, age of the house, and distance to the city center.
-Adjust the inputs in the sidebar to get a predicted price.
-""")
+# Create tabs
+tab1, tab2 = st.tabs(["Prediction", "Visualizations"])
 
-# Live prediction
-input_data = pd.DataFrame({
-    'square_feet': [square_feet],
-    'num_rooms': [num_rooms],
-    'age': [age],
-    'distance_to_city(km)': [distance_to_city]
-})
-if use_scaling and scaler is not None:
-    input_data_scaled = scaler.transform(input_data)
-else:
-    input_data_scaled = input_data
-prediction = model.predict(input_data_scaled)[0]
-st.success(f"Predicted House Price: ${prediction:,.2f}")
+# Tab 1: Prediction
+with tab1:
+    # Main content with interactive effects
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        st.metric("Model R² Score", f"{score:.4f}", delta=None, delta_color="normal")
+        st.progress(score)
 
-# Visualizations
-if plot_type != "None":
-    st.subheader("Data Visualization")
-    fig, ax = plt.subplots()
-    if plot_type == "Price Distribution":
-        sns.histplot(filtered_data['price'], bins=30, kde=True, ax=ax)
-        ax.set_title("Price Distribution")
-        ax.set_xlabel("Price ($)")
-        ax.set_ylabel("Count")
-    elif plot_type == "Feature Correlation":
-        corr = filtered_data[['square_feet', 'num_rooms', 'age', 'distance_to_city(km)', 'price']].corr()
-        sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
-        ax.set_title("Feature Correlation Matrix")
-    elif plot_type == "Scatter Plot":
-        sns.scatterplot(x=filtered_data[feature_for_scatter], y=filtered_data['price'], ax=ax)
-        ax.set_title(f"Price vs {feature_for_scatter.replace('_', ' ').title()}")
-        ax.set_xlabel(feature_for_scatter.replace('_', ' ').title())
-        ax.set_ylabel("Price ($)")
-    st.pyplot(fig)
+    with col2:
+        st.write("""
+        This app predicts house prices based on square footage, number of rooms, age of the house, and distance to the city center.
+        Adjust the inputs in the sidebar to get a predicted price.
+        """)
+
+    # Live prediction
+    input_data = pd.DataFrame({
+        'square_feet': [square_feet],
+        'num_rooms': [num_rooms],
+        'age': [age],
+        'distance_to_city(km)': [distance_to_city]
+    })
+    if use_scaling and scaler is not None:
+        input_data_scaled = scaler.transform(input_data)
+    else:
+        input_data_scaled = input_data
+    prediction = model.predict(input_data_scaled)[0]
+    st.success(f"Predicted House Price: ${prediction:,.2f}")
+
+    # Download PDF button
+    @st.cache_data
+    def generate_pdf_report(model_type, score, square_feet, num_rooms, age, distance_to_city, prediction):
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        
+        # Custom style for premium look
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Title'],
+            fontName='Helvetica-Bold',
+            fontSize=24,
+            textColor=colors.black,
+            spaceAfter=30,
+            alignment=1  # Center
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=14,
+            textColor=colors.black,
+            spaceAfter=12
+        )
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=12,
+            textColor=colors.black,
+            spaceAfter=6
+        )
+        
+        story = []
+        
+        # Title
+        story.append(Paragraph("House Price Prediction Report", title_style))
+        story.append(Spacer(1, 12))
+        
+        # Model Details
+        story.append(Paragraph("Model Details", heading_style))
+        model_data = [
+            ['Model Type', model_type],
+            ['R² Score', f"{score:.4f}"]
+        ]
+        model_table = Table(model_data)
+        model_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(model_table)
+        story.append(Spacer(1, 12))
+        
+        # Input Features
+        story.append(Paragraph("Input Features", heading_style))
+        input_data = [
+            ['Feature', 'Value'],
+            ['Square Feet', f"{square_feet:,.0f}"],
+            ['Number of Rooms', str(num_rooms)],
+            ['Age (years)', f"{age:.0f}"],
+            ['Distance to City (km)', f"{distance_to_city:.1f}"]
+        ]
+        input_table = Table(input_data)
+        input_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(input_table)
+        story.append(Spacer(1, 12))
+        
+        # Prediction
+        story.append(Paragraph("Prediction Result", heading_style))
+        pred_data = [
+            ['Predicted Price', f"${prediction:,.2f}"]
+        ]
+        pred_table = Table(pred_data)
+        pred_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 14),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(pred_table)
+        
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    pdf_buffer = generate_pdf_report(model_type, score, square_feet, num_rooms, age, distance_to_city, prediction)
+    st.download_button(
+        label="Download Final Report as PDF",
+        data=pdf_buffer,
+        file_name="house_price_prediction_report.pdf",
+        mime="application/pdf"
+    )
+
+# Tab 2: Visualizations
+with tab2:
+    # Interactive Visualizations with Plotly
+    if plot_type != "None":
+        st.subheader("Data Visualization")
+        if plot_type == "Price Distribution":
+            fig = px.histogram(filtered_data, x='price', nbins=30, marginal="rug",
+                            title="Price Distribution",
+                            labels={'price': 'Price ($)'})
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        elif plot_type == "Feature Correlation":
+            corr = filtered_data[['square_feet', 'num_rooms', 'age', 'distance_to_city(km)', 'price']].corr()
+            fig = px.imshow(corr, text_auto=True, aspect="auto",
+                            title="Feature Correlation Matrix",
+                            color_continuous_scale='RdBu_r')
+            st.plotly_chart(fig, use_container_width=True)
+        elif plot_type == "Scatter Plot":
+            fig = px.scatter(filtered_data, x=feature_for_scatter, y='price',
+                            title=f"Price vs {feature_for_scatter.replace('_', ' ').title()}",
+                            labels={feature_for_scatter: feature_for_scatter.replace('_', ' ').title(),
+                                    'price': 'Price ($)'})
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
